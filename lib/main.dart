@@ -2,7 +2,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-void main() => runApp(const HortaDasFloresApp());
+import 'services/mqtt_service.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MqttService.instance.connect(); // não bloqueia a abertura do app
+  runApp(const HortaDasFloresApp());
+}
 
 abstract final class AppColors {
   static const forest = Color(0xFF1E3B2B);
@@ -20,7 +26,7 @@ abstract final class AppColors {
 
 enum AppPage { login, garden, irrigation }
 
-const moistureByBed = [78, 64, 71, 82, 59, 73, 66, 75, 62, 68];
+List<int> get moistureByBed => MqttService.instance.moisture.value;
 
 class HortaDasFloresApp extends StatelessWidget {
   const HortaDasFloresApp({super.key});
@@ -115,6 +121,13 @@ class _HortaNavigatorState extends State<HortaNavigator> {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<int>>(
+      valueListenable: MqttService.instance.moisture,
+      builder: (context, _, __) => _buildPage(),
+    );
+  }
+
+  Widget _buildPage() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 280),
       switchInCurve: Curves.easeOutCubic,
@@ -1076,7 +1089,10 @@ class GardenMap extends StatelessWidget {
                 child: ClipRRect(
                   borderRadius: const BorderRadius.all(Radius.circular(24)),
                   child: CustomPaint(
-                    painter: GardenPainter(selectedBed: selectedBed),
+                    painter: GardenPainter(
+                      selectedBed: selectedBed,
+                      moisture: moistureByBed[selectedBed - 1],
+                    ),
                   ),
                 ),
               ),
@@ -1133,9 +1149,10 @@ class GardenMap extends StatelessWidget {
 }
 
 class GardenPainter extends CustomPainter {
-  const GardenPainter({required this.selectedBed});
+  const GardenPainter({required this.selectedBed, required this.moisture});
 
   final int selectedBed;
+  final int moisture;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1322,7 +1339,7 @@ class GardenPainter extends CustomPainter {
     canvas.drawPath(drop, Paint()..color = AppColors.white);
     final textPainter = TextPainter(
       text: TextSpan(
-        text: 'C$selectedBed  ${moistureByBed[selectedBed - 1]}%',
+        text: 'C$selectedBed  $moisture%',
         style: const TextStyle(
           color: AppColors.forest,
           fontSize: 8,
@@ -1339,7 +1356,8 @@ class GardenPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant GardenPainter oldDelegate) =>
-      selectedBed != oldDelegate.selectedBed;
+      selectedBed != oldDelegate.selectedBed ||
+      moisture != oldDelegate.moisture;
 }
 
 class AnalyticsCard extends StatelessWidget {
@@ -1945,35 +1963,43 @@ class ConnectionBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0x40104D3D),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: AppColors.white.withOpacity(.17)),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: Color(0xFF7AF1A8),
-              shape: BoxShape.circle,
-            ),
-            child: SizedBox(width: 7, height: 7),
+    return ValueListenableBuilder<MqttStatus>(
+      valueListenable: MqttService.instance.status,
+      builder: (context, status, _) {
+        final (label, color) = switch (status) {
+          MqttStatus.connected => ('SENSOR CONECTADO', const Color(0xFF7AF1A8)),
+          MqttStatus.connecting => ('CONECTANDO...', AppColors.gold),
+          MqttStatus.reconnecting => ('RECONECTANDO...', AppColors.gold),
+          MqttStatus.disconnected => ('SEM CONEXÃO', const Color(0xFFFF8A80)),
+        };
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0x40104D3D),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: AppColors.white.withOpacity(.17)),
           ),
-          SizedBox(width: 7),
-          Text(
-            'SENSOR CONECTADO',
-            style: TextStyle(
-              color: Color(0xD9FFFFFF),
-              fontSize: 8,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                child: const SizedBox(width: 7, height: 7),
+              ),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xD9FFFFFF),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
